@@ -1,0 +1,24 @@
+{
+  "name": "whatsapp-saas-bot",
+  "version": "1.0.0",
+  "description": "Mini SaaS de automacao de atendimento WhatsApp com Baileys",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "nodemon --watch src --ignore sessions --ignore data src/index.js",
+    "start": "node src/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "dayjs": "^1.11.20",
+    "dotenv": "^17.3.1",
+    "googleapis": "^171.4.0",
+    "pino": "^10.3.1",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}

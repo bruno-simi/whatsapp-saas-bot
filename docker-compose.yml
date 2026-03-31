@@ -1,0 +1,12 @@
+services:
+  whatsapp-bot:
+    build: .
+    container_name: whatsapp-saas-bot
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+      - ./sessions:/app/sessions
+    restart: unless-stopped
