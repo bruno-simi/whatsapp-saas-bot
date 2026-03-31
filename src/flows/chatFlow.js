@@ -136,14 +136,26 @@ async function handleChat({ phone, message }) {
       return responseService.slotChoiceRetryMessage();
     }
     const selectedSlot = slots[choice - 1];
-
-    const result = await appointmentService.confirmAppointment({
-      user,
-      phone,
-      service: user.current_service || "Servico nao informado",
-      slot: selectedSlot,
-      name: user.name || "Cliente",
-    });
+    let result;
+    try {
+      result = await appointmentService.confirmAppointment({
+        user,
+        phone,
+        service: user.current_service || "Servico nao informado",
+        slot: selectedSlot,
+        name: user.name || "Cliente",
+      });
+    } catch (error) {
+      if (error?.code === "SLOT_UNAVAILABLE") {
+        const refreshedSlots = await appointmentService.getSlots(user.current_date_text || selectedSlot.start);
+        user = stateService.setState(user, {
+          state: STATES.AWAITING_CONFIRMATION,
+          current_slot: JSON.stringify(refreshedSlots.slice(0, 4)),
+        });
+        return `Esse horario acabou de ficar indisponivel.\n\n${formatSlots(refreshedSlots)}`;
+      }
+      throw error;
+    }
 
     user = stateService.setState(user, {
       state: STATES.IDLE,

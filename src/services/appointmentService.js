@@ -16,10 +16,42 @@ function parseDateText(input) {
 
 async function getSlots(dateText) {
   const dateTime = parseDateText(dateText);
-  return calendarProvider.listAvailableSlots(dateTime);
+  const slots = await calendarProvider.listAvailableSlots(dateTime);
+  if (!slots.length) return slots;
+
+  const firstStart = slots[0].start;
+  const lastEnd = slots[slots.length - 1].end;
+  const localAppointments = repos.listAppointmentsInRange(firstStart, lastEnd);
+  if (!localAppointments.length) return slots;
+
+  return slots.filter((slot) => {
+    const slotStart = dayjs(slot.start);
+    const slotEnd = dayjs(slot.end);
+    const hasConflict = localAppointments.some((appointment) => {
+      const appointmentStart = dayjs(appointment.start_at);
+      const appointmentEnd = dayjs(appointment.end_at);
+      return slotStart.isBefore(appointmentEnd) && slotEnd.isAfter(appointmentStart);
+    });
+    return !hasConflict;
+  });
 }
 
 async function confirmAppointment({ user, phone, service, slot, name }) {
+  const localConflicts = repos.listAppointmentsInRange(slot.start, slot.end);
+  if (localConflicts.length) {
+    const error = new Error("Horario indisponivel");
+    error.code = "SLOT_UNAVAILABLE";
+    throw error;
+  }
+
+  const availableSlots = await getSlots(slot.start);
+  const stillAvailable = availableSlots.some((availableSlot) => availableSlot.start === slot.start && availableSlot.end === slot.end);
+  if (!stillAvailable) {
+    const error = new Error("Horario indisponivel");
+    error.code = "SLOT_UNAVAILABLE";
+    throw error;
+  }
+
   const event = await calendarProvider.createEvent({
     service,
     phone,

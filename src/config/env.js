@@ -15,6 +15,9 @@ const env = {
   sessionTimeoutMinutes: Number(process.env.SESSION_TIMEOUT_MINUTES || 20),
   tenantId: process.env.TENANT_ID || "default",
   sqlitePath: process.env.SQLITE_PATH || path.join(rootDir, "data", "app.sqlite"),
+  useAi: (process.env.USE_AI || "false").toLowerCase() === "true",
+  geminiApiKey: process.env.GEMINI_API_KEY || "",
+  geminiTimeoutMs: Number(process.env.GEMINI_TIMEOUT_MS || 8000),
 };
 
 module.exports = env;

@@ -76,9 +76,22 @@ function createAppointment(payload) {
   return db.prepare("SELECT * FROM appointments WHERE id = ?").get(result.lastInsertRowid);
 }
 
+function listAppointmentsInRange(startAt, endAt) {
+  return db.prepare(`
+    SELECT *
+    FROM appointments
+    WHERE tenant_id = ?
+      AND status = 'confirmed'
+      AND start_at < ?
+      AND end_at > ?
+    ORDER BY start_at ASC
+  `).all(env.tenantId, endAt, startAt);
+}
+
 module.exports = {
   findOrCreateUser,
   updateUserState,
   saveMessage,
   createAppointment,
+  listAppointmentsInRange,
 };

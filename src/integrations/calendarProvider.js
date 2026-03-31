@@ -18,8 +18,8 @@ async function listAvailableSlots(dateTime) {
   try {
     return await real.listAvailableSlots(dateTime);
   } catch (error) {
-    logger.error("calendarProvider", "Falha no Google Calendar real, fallback para mock", error.message);
-    return mock.listAvailableSlots(dateTime);
+    logger.error("calendarProvider", "Falha no Google Calendar real ao listar horarios", error.message);
+    return [];
   }
 }
 
