@@ -1,4 +1,5 @@
 const { STATES, GLOBAL_COMMANDS } = require("../utils/constants");
+const dayjs = require("dayjs");
 const { normalizeText } = require("../utils/text");
 const intentService = require("../services/intentService");
 const responseService = require("../services/responseService");
@@ -10,6 +11,14 @@ const repos = require("../database/repositories");
 const logger = require("../utils/logger");
 const { hasDateHint } = require("../utils/dateParser");
 
+function isConsultorioFlow() {
+  return (
+    env.businessType === "consultorio"
+    || env.configTenantId === "consultorio-demo"
+    || env.tenantId === "consultorio-demo"
+  );
+}
+
 function isCommand(text, command) {
   return normalizeText(text) === command;
 }
@@ -19,6 +28,15 @@ function formatSlots(slots) {
     return responseService.generateHumanResponse("no_slots");
   }
   return responseService.generateHumanResponse("slots_list", {}, { slots });
+}
+
+async function consultorioNextSlotsForService(serviceName) {
+  const nextSlots = await appointmentService.getNextAvailableSlots(dayjs().format("YYYY-MM-DD 09:00"), {
+    daysToSearch: 7,
+    maxSlots: 4,
+    serviceName,
+  });
+  return nextSlots;
 }
 
 function continuationPrompt(user) {
@@ -54,6 +72,19 @@ async function handleChat({ phone, message }) {
   if (isCommand(text, GLOBAL_COMMANDS.MENU)) {
     user = stateService.setState(user, { state: STATES.IDLE });
     return responseService.fallbackMenu(user.name);
+  }
+
+  if (
+    normalized === "voltar"
+    && (user.state === STATES.AWAITING_DATE || user.state === STATES.AWAITING_CONFIRMATION)
+  ) {
+    user = stateService.setState(user, {
+      state: STATES.AWAITING_SERVICE,
+      current_service: null,
+      current_date_text: null,
+      current_slot: null,
+    });
+    return `${responseService.scheduleStartMessage(user.name)}\n\nSe preferir, digite a especialidade correta.`;
   }
 
   const intent = intentService.detectIntent(text);
@@ -100,6 +131,19 @@ async function handleChat({ phone, message }) {
       state: STATES.AWAITING_DATE,
       current_service: detectedService,
     });
+    if (isConsultorioFlow()) {
+      const nextSlots = await consultorioNextSlotsForService(detectedService);
+      if (!nextSlots.length) {
+        return responseService.generateHumanResponse("no_slots", { name: user.name });
+      }
+      user = stateService.setState(user, {
+        state: STATES.AWAITING_CONFIRMATION,
+        current_service: detectedService,
+        current_date_text: dayjs().format("YYYY-MM-DD 09:00"),
+        current_slot: JSON.stringify(nextSlots.slice(0, 4)),
+      });
+      return responseService.generateHumanResponse("slots_list", { name: user.name }, { slots: nextSlots });
+    }
     return responseService.askDateMessage(user.name);
   }
 
@@ -223,12 +267,23 @@ async function handleChat({ phone, message }) {
       });
     } catch (error) {
       if (error?.code === "SLOT_UNAVAILABLE") {
-        const refreshedSlots = await appointmentService.getSlots(user.current_date_text || selectedSlot.start);
+        const refreshedSlots = await appointmentService.getSlots(
+          user.current_date_text || selectedSlot.start,
+          { serviceName: user.current_service || undefined }
+        );
         user = stateService.setState(user, {
           state: STATES.AWAITING_CONFIRMATION,
           current_slot: JSON.stringify(refreshedSlots.slice(0, 4)),
         });
-        return responseService.generateHumanResponse("slot_unavailable", {}, { slots: refreshedSlots });
+        const stillAvailable = refreshedSlots.some(
+          (slot) =>
+            dayjs(slot.start).valueOf() === dayjs(selectedSlot.start).valueOf()
+            && dayjs(slot.end).valueOf() === dayjs(selectedSlot.end).valueOf()
+        );
+        if (stillAvailable) {
+          return responseService.generateHumanResponse("slots_reminder", { name: user.name }, { slots: refreshedSlots });
+        }
+        return responseService.generateHumanResponse("slot_unavailable", { name: user.name }, { slots: refreshedSlots });
       }
       throw error;
     }
@@ -281,6 +336,19 @@ async function handleChat({ phone, message }) {
         state: STATES.AWAITING_DATE,
         current_service: detectedService,
       });
+      if (isConsultorioFlow()) {
+        const nextSlots = await consultorioNextSlotsForService(detectedService);
+        if (!nextSlots.length) {
+          return responseService.generateHumanResponse("no_slots", { name: user.name });
+        }
+        stateService.setState(user, {
+          state: STATES.AWAITING_CONFIRMATION,
+          current_service: detectedService,
+          current_date_text: dayjs().format("YYYY-MM-DD 09:00"),
+          current_slot: JSON.stringify(nextSlots.slice(0, 4)),
+        });
+        return responseService.generateHumanResponse("slots_list", { name: user.name }, { slots: nextSlots });
+      }
       return responseService.askDateMessage(user.name);
     }
 

@@ -94,7 +94,8 @@ async function getAvailableSlots(date, options = {}) {
   return withOpeningHours.filter((slot, index) => {
     if (index === 0) return true;
     const prev = withOpeningHours[index - 1];
-    const diff = dayjs(slot.start).diff(dayjs(prev.end), "minute");
+    // O intervalo minimo deve ser entre inicios de slots consecutivos.
+    const diff = dayjs(slot.start).diff(dayjs(prev.start), "minute");
     return diff >= gapMinutes;
   });
 }

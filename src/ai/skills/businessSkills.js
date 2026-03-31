@@ -8,7 +8,7 @@ const SKILLS = {
     pricing: "Os valores variam por modelo e servico, te passo uma estimativa.",
   },
   consultorio: {
-    services: ["consulta medica", "consulta odontologica", "procedimentos esteticos"],
+    services: ["clinico geral", "cardiologia", "dermatologia", "ginecologia", "pediatria", "ortopedia"],
     pricing: "Os valores dependem do procedimento. Posso te orientar.",
   },
 };
@@ -29,6 +29,10 @@ function currentSkill(businessType) {
 }
 
 function listServices(businessType) {
+  const isConsultorioDemo = env.configTenantId === "consultorio-demo" || env.tenantId === "consultorio-demo";
+  if (isConsultorioDemo) {
+    return currentSkill("consultorio").services;
+  }
   const business = repos.getBusiness();
   const settings = safeJson(business?.settings, {});
   if (Array.isArray(settings.services) && settings.services.length) {
@@ -49,12 +53,35 @@ function serviceLabel(service) {
 
 function matchServiceFromText(text, businessType) {
   const normalized = normalizeText(text || "");
-  const servicesRaw = listServices(businessType || env.businessType) || [];
+  const isConsultorioDemo = env.configTenantId === "consultorio-demo" || env.tenantId === "consultorio-demo";
+  const currentBusinessType = isConsultorioDemo
+    ? "consultorio"
+    : (businessType || env.businessType || "").toLowerCase();
+  const servicesRaw = listServices(currentBusinessType) || [];
   const services = servicesRaw
     .map((service) => serviceLabel(service))
     .filter(Boolean);
+
+  const numericChoice = normalized.match(/\b([1-9])\b/);
+  if (numericChoice) {
+    const index = Number(numericChoice[1]) - 1;
+    if (services[index]) return services[index];
+  }
+
   const direct = services.find((service) => normalized.includes(normalizeText(service))) || null;
   if (direct) return direct;
+
+  if (currentBusinessType === "consultorio") {
+    if (normalized.includes("cardiologista")) return "cardiologia";
+    if (normalized.includes("dermatologista")) return "dermatologia";
+    if (normalized.includes("ginecologista")) return "ginecologia";
+    if (normalized.includes("pediatra")) return "pediatria";
+    if (normalized.includes("ortopedista")) return "ortopedia";
+    if (normalized.includes("clinico")) return "clinico geral";
+    // "consulta" sozinha nao define especialidade.
+    return null;
+  }
+
   if (normalized.includes("consulta")) {
     return services.find((service) => normalizeText(service).includes("consulta")) || null;
   }

@@ -1,4 +1,5 @@
 const env = require("../config/env");
+const businessSkills = require("../ai/skills/businessSkills");
 
 const responses = {
   barbearia: {
@@ -68,8 +69,12 @@ function firstName(name) {
   return clean.split(/\s+/)[0];
 }
 
+function isConsultorioDemoTenant() {
+  return env.configTenantId === "consultorio-demo" || env.tenantId === "consultorio-demo";
+}
+
 function withCustomerName(text, name) {
-  if (env.tenantId !== "consultorio-demo") return text;
+  if (!isConsultorioDemoTenant() && env.businessType !== "consultorio") return text;
   const shortName = firstName(name);
   if (!shortName) return text;
   return `${shortName}, ${text}`;
@@ -100,6 +105,20 @@ function fallbackMenu(name) {
 }
 
 function scheduleStartMessage(name) {
+  if (env.businessType === "consultorio" || isConsultorioDemoTenant()) {
+    const specialties = businessSkills
+      .listServices(env.businessType)
+      .map((item) => (typeof item === "string" ? item : item?.name || item?.label || item?.title || ""))
+      .filter(Boolean)
+      .slice(0, 6);
+    if (specialties.length) {
+      const list = specialties.map((specialty, index) => `${index + 1}) ${specialty}`).join("\n");
+      return withCustomerName(
+        `Perfeito! Para consulta, me diga a especialidade medica desejada:\n${list}\n\nPode responder com o nome da especialidade.`,
+        name
+      );
+    }
+  }
   return generateHumanResponse("ask_service", { name });
 }
 

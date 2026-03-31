@@ -7,6 +7,8 @@ const { STATES } = require("../utils/constants");
 const appointmentService = require("../services/appointmentService");
 const businessSkills = require("./skills/businessSkills");
 const { parseDateText, hasDateHint } = require("../utils/dateParser");
+const { normalizeText } = require("../utils/text");
+const intentService = require("../services/intentService");
 
 function shouldUseLegacy(intent) {
   return intent === "services" || intent === "price";
@@ -25,6 +27,21 @@ function formatSlots(slots) {
 }
 
 async function processMessage(message, context = {}) {
+  const normalized = normalizeText(message || "");
+  const flowState = context.currentState;
+  if (
+    isFlowInProgress(flowState)
+    && /^\s*([1-9])\s*$/.test(normalized)
+    && (flowState === STATES.AWAITING_CONFIRMATION || flowState === STATES.AWAITING_SERVICE)
+  ) {
+    return {
+      handled: false,
+      useLegacyFlow: true,
+      intent: intentService.detectIntent(message),
+      source: "context:numeric_pick_in_flow",
+    };
+  }
+
   const ruleResult = applyRules(message);
   if (ruleResult) {
     logger.info("decisionEngine", "Regra aplicada", { source: ruleResult.source, intent: ruleResult.intent });

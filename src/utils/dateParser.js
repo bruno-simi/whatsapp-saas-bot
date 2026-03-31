@@ -29,7 +29,15 @@ function nextWeekDay(targetDay) {
 function hasDateHint(input) {
   const normalized = normalizeText(input || "");
   if (!normalized) return false;
-  if (normalized.includes("amanha") || normalized.includes("hoje") || /\bhj\b/.test(normalized)) {
+  if (
+    normalized.includes("amanha")
+    || normalized.includes("hoje")
+    || /\bhj\b/.test(normalized)
+    || normalized.includes("depois de amanha")
+    || normalized.includes("proximo dia")
+    || normalized.includes("dia seguinte")
+    || normalized.includes("proxima semana")
+  ) {
     return true;
   }
   if (
@@ -41,7 +49,11 @@ function hasDateHint(input) {
   ) {
     return true;
   }
-  if (/\b\d{1,2}\/\d{1,2}(\/\d{2,4})?\b/.test(normalized) || /\b\d{4}-\d{2}-\d{2}\b/.test(normalized)) {
+  if (
+    /\b\d{1,2}\/\d{1,2}(\/\d{2,4})?\b/.test(normalized)
+    || /\b\d{4}-\d{2}-\d{2}\b/.test(normalized)
+    || /\b\d{1,2}[-/.]\d{1,2}([-/.]\d{2,4})?\b/.test(normalized)
+  ) {
     return true;
   }
   if (/\b\d{1,2}[:h]\d{2}\b/.test(normalized)) return true;
@@ -50,8 +62,43 @@ function hasDateHint(input) {
 }
 
 function fromRules(input) {
-  const text = (input || "").toLowerCase().trim();
+  const raw = String(input || "").trim();
+  if (
+    (/^\d{4}-\d{2}-\d{2}T/i.test(raw) || raw.endsWith("Z") || /^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}/.test(raw))
+    && dayjs(raw).isValid()
+  ) {
+    return toIsoMinute(dayjs(raw).second(0).millisecond(0));
+  }
+  const text = raw.toLowerCase().trim();
   let base = dayjs();
+
+  const isoDayMatch = text.match(/\b(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{1,2}):(\d{2}))?\b/);
+  if (isoDayMatch) {
+    const y = Number(isoDayMatch[1]);
+    const mo = Number(isoDayMatch[2]);
+    const d = Number(isoDayMatch[3]);
+    base = dayjs(`${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
+    if (isoDayMatch[4] != null) {
+      base = base.hour(Number(isoDayMatch[4])).minute(Number(isoDayMatch[5] || 0));
+    } else {
+      base = base.hour(9).minute(0);
+    }
+    const hasRelativeDay =
+      text.includes("hoje")
+      || /\bhj\b/.test(text)
+      || text.includes("depois de amanha")
+      || text.includes("depois de amanhã")
+      || text.includes("amanha")
+      || text.includes("amanhã")
+      || text.includes("proximo dia")
+      || text.includes("dia seguinte");
+    const slashDate = /\b(\d{1,2})\/(\d{1,2})/.test(text);
+    if (base.isValid() && !hasRelativeDay && !slashDate) {
+      return toIsoMinute(base.second(0).millisecond(0));
+    }
+    base = dayjs();
+  }
+
   const explicitDate = text.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
   if (explicitDate) {
     const day = Number(explicitDate[1]);
@@ -65,9 +112,28 @@ function fromRules(input) {
     }
   }
 
+  if (!explicitDate) {
+    const hyphenDate = text.match(/\b(\d{1,2})-(\d{1,2})(?:-(\d{2,4}))?\b/);
+    if (hyphenDate) {
+      const day = Number(hyphenDate[1]);
+      const month = Number(hyphenDate[2]);
+      const yearRaw = hyphenDate[3];
+      const currentYear = dayjs().year();
+      const year = yearRaw ? Number(yearRaw.length === 2 ? `20${yearRaw}` : yearRaw) : currentYear;
+      const hyphenBase = dayjs(`${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`);
+      if (hyphenBase.isValid()) {
+        base = hyphenBase;
+      }
+    }
+  }
+
   if (text.includes("hoje") || /\bhj\b/.test(text)) {
     base = dayjs();
+  } else if (text.includes("depois de amanha") || text.includes("depois de amanhã")) {
+    base = base.add(2, "day");
   } else if (text.includes("amanha") || text.includes("amanhã")) {
+    base = base.add(1, "day");
+  } else if (text.includes("proximo dia") || text.includes("dia seguinte")) {
     base = base.add(1, "day");
   }
   if (text.includes("daqui") && text.includes("dias")) {
@@ -81,6 +147,10 @@ function fromRules(input) {
       base = nextWeekDay(weekday);
       break;
     }
+  }
+
+  if (text.includes("proxima semana")) {
+    base = base.add(7, "day");
   }
 
   if (text.includes("cedo")) {

@@ -5,7 +5,8 @@ const repos = require("../database/repositories");
 
 function resolveCalendarId() {
   const business = repos.getBusiness();
-  return business?.calendar_id || env.googleCalendarId;
+  // Prioriza agenda do .env para manter comportamento previsivel por ambiente/tenant.
+  return env.googleCalendarId || business?.calendar_id;
 }
 
 function buildGoogleClient() {

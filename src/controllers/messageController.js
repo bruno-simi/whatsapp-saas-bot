@@ -7,6 +7,7 @@ const { updateContext } = require("../ai/contextStore");
 const { processMessage } = require("../ai/decisionEngine");
 const { buildAIContext } = require("../ai/buildAIContext");
 const { STATES } = require("../utils/constants");
+const { normalizeText } = require("../utils/text");
 
 const botSentMessageIds = new Set();
 const processedIncomingMessageIds = new Set();
@@ -34,13 +35,44 @@ function extractFirstName(name) {
   return String(name || "").trim().split(/\s+/)[0] || "";
 }
 
+const NOT_A_NAME_GREETINGS = new Set([
+  "oi",
+  "ola",
+  "opa",
+  "eai",
+  "eae",
+  "fala",
+  "bom dia",
+  "boa tarde",
+  "boa noite",
+  "menu",
+  "cancelar",
+]);
+
 function looksLikeName(text) {
   const trimmed = String(text || "").trim();
   if (!trimmed || trimmed.length < 2 || trimmed.length > 60) return false;
+  const asKey = normalizeText(trimmed);
+  if (NOT_A_NAME_GREETINGS.has(asKey)) return false;
   if (/\d/.test(trimmed)) return false;
   const words = trimmed.split(/\s+/);
   if (words.length > 4) return false;
+  if (words.some((word) => NOT_A_NAME_GREETINGS.has(normalizeText(word)))) return false;
   return words.every((word) => /^[A-Za-zÀ-ÖØ-öø-ÿ'-]+$/.test(word));
+}
+
+function isConsultorioDemoNameGate() {
+  return env.configTenantId === "consultorio-demo" || env.tenantId === "consultorio-demo";
+}
+
+function requiresConsultorioPatientName() {
+  return env.businessType === "consultorio" || isConsultorioDemoNameGate();
+}
+
+function shouldCollectConsultorioDemoName(user) {
+  const raw = String(user?.name || "").trim();
+  if (!raw) return true;
+  return NOT_A_NAME_GREETINGS.has(normalizeText(raw));
 }
 
 async function handleIncomingMessage(sock, msg) {
@@ -68,7 +100,7 @@ async function handleIncomingMessage(sock, msg) {
   const user = stateService.getUser(phone);
   const trimmedText = text.trim();
 
-  if (env.tenantId === "consultorio-demo" && !user.name) {
+  if (requiresConsultorioPatientName() && shouldCollectConsultorioDemoName(user)) {
     repos.saveMessage(user.id, "in", trimmedText);
 
     let reply = "Para iniciar seu atendimento, poderia me informar seu nome completo?";
@@ -87,7 +119,7 @@ async function handleIncomingMessage(sock, msg) {
     return;
   }
 
-  if (!user.name && text.split(" ").length <= 3 && !/\d/.test(text)) {
+  if (!requiresConsultorioPatientName() && !user.name && text.split(" ").length <= 3 && !/\d/.test(text)) {
     stateService.setState(user, { name: text });
   }
 

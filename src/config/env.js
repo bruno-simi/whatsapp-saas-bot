@@ -14,6 +14,8 @@ const env = {
   allowSelfMessages: (process.env.ALLOW_SELF_MESSAGES || "false").toLowerCase() === "true",
   sessionTimeoutMinutes: Number(process.env.SESSION_TIMEOUT_MINUTES || 20),
   tenantId: process.env.TENANT_ID || "default",
+  // Nunca alterado em runtime (ex.: whatsappService pode sobrescrever `tenantId` com business_id da integracao).
+  configTenantId: process.env.TENANT_ID || "default",
   sqlitePath: process.env.SQLITE_PATH || path.join(rootDir, "data", "app.sqlite"),
   useAi: (process.env.USE_AI || "false").toLowerCase() === "true",
   geminiApiKey: process.env.GEMINI_API_KEY || "",
