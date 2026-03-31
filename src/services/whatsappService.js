@@ -14,12 +14,28 @@ const logger = require("../utils/logger");
 const messageController = require("../controllers/messageController");
 
 const sessionsRoot = path.resolve(__dirname, "..", "..", "sessions");
+let isSessionLogSuppressed = false;
 
 if (!fs.existsSync(sessionsRoot)) {
   fs.mkdirSync(sessionsRoot, { recursive: true });
 }
 
+function suppressVerboseSessionLog() {
+  if (isSessionLogSuppressed) return;
+
+  const originalConsoleLog = console.log;
+  console.log = (...args) => {
+    if (typeof args[0] === "string" && args[0].startsWith("Closing session:")) {
+      return;
+    }
+    originalConsoleLog(...args);
+  };
+  isSessionLogSuppressed = true;
+}
+
 async function startWhatsapp() {
+  suppressVerboseSessionLog();
+
   const instanceId = env.tenantId || "default";
   const authPath = path.join(sessionsRoot, instanceId);
   const { state, saveCreds } = await useMultiFileAuthState(authPath);
