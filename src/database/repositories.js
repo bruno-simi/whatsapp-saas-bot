@@ -58,13 +58,14 @@ function saveMessage(userId, direction, content) {
 
 function createAppointment(payload) {
   const stmt = db.prepare(`
-    INSERT INTO appointments (tenant_id, user_id, service, start_at, end_at, phone, status, calendar_event_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO appointments (tenant_id, user_id, customer_id, service, start_at, end_at, phone, status, calendar_event_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const result = stmt.run(
     env.tenantId,
     payload.userId,
+    payload.customerId || null,
     payload.service,
     payload.startAt,
     payload.endAt,
@@ -88,10 +89,165 @@ function listAppointmentsInRange(startAt, endAt) {
   `).all(env.tenantId, endAt, startAt);
 }
 
+function findOrCreateCustomer(phone, patch = {}) {
+  const findStmt = db.prepare("SELECT * FROM customers WHERE tenant_id = ? AND phone = ?");
+  const found = findStmt.get(env.tenantId, phone);
+  if (found) {
+    const nextName = patch.name ?? found.name;
+    const nextNotes = patch.notes ?? found.notes;
+    db.prepare(`
+      UPDATE customers
+      SET name = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(nextName, nextNotes, found.id);
+    return findStmt.get(env.tenantId, phone);
+  }
+
+  db.prepare(`
+    INSERT INTO customers (tenant_id, phone, name, notes)
+    VALUES (?, ?, ?, ?)
+  `).run(env.tenantId, phone, patch.name || null, patch.notes || null);
+
+  return findStmt.get(env.tenantId, phone);
+}
+
+function updateCustomerMemory(customerId, patch = {}) {
+  const current = db.prepare("SELECT * FROM customers WHERE id = ?").get(customerId);
+  if (!current) return null;
+  db.prepare(`
+    UPDATE customers
+    SET
+      name = ?,
+      last_service = ?,
+      last_visit = ?,
+      notes = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(
+    patch.name ?? current.name,
+    patch.last_service ?? current.last_service,
+    patch.last_visit ?? current.last_visit,
+    patch.notes ?? current.notes,
+    customerId
+  );
+  return db.prepare("SELECT * FROM customers WHERE id = ?").get(customerId);
+}
+
+function listRecentAppointmentsByCustomer(customerId, limit = 3) {
+  return db.prepare(`
+    SELECT *
+    FROM appointments
+    WHERE tenant_id = ?
+      AND customer_id = ?
+    ORDER BY start_at DESC
+    LIMIT ?
+  `).all(env.tenantId, customerId, limit);
+}
+
+function getBusiness() {
+  const row = db.prepare("SELECT * FROM businesses WHERE id = ?").get(env.tenantId);
+  if (row) return row;
+  db.prepare(`
+    INSERT OR IGNORE INTO businesses (id, name, type, calendar_id, settings)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(env.tenantId, "Negocio", env.businessType, null, "{}");
+  return db.prepare("SELECT * FROM businesses WHERE id = ?").get(env.tenantId);
+}
+
+function getActiveSubscription() {
+  return db.prepare(`
+    SELECT *
+    FROM subscriptions
+    WHERE business_id = ?
+    ORDER BY id DESC
+    LIMIT 1
+  `).get(env.tenantId);
+}
+
+function updateBusinessSettings(patch = {}) {
+  const business = getBusiness();
+  let currentSettings = {};
+  try {
+    currentSettings = JSON.parse(business.settings || "{}");
+  } catch (error) {
+    currentSettings = {};
+  }
+  const nextSettings = {
+    ...currentSettings,
+    ...patch,
+  };
+  db.prepare(`
+    UPDATE businesses
+    SET settings = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(JSON.stringify(nextSettings), env.tenantId);
+  return getBusiness();
+}
+
+function updateBusinessProfile(patch = {}) {
+  const current = getBusiness();
+  const next = {
+    name: patch.name ?? current.name,
+    type: patch.type ?? current.type,
+    calendar_id: patch.calendar_id ?? current.calendar_id,
+  };
+  db.prepare(`
+    UPDATE businesses
+    SET name = ?, type = ?, calendar_id = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(next.name, next.type, next.calendar_id, env.tenantId);
+  return getBusiness();
+}
+
+function setWhatsappIntegration(businessId, phoneNumber) {
+  db.prepare(`
+    INSERT INTO whatsapp_integrations (business_id, phone_number, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(phone_number) DO UPDATE SET
+      business_id = excluded.business_id,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(businessId, phoneNumber);
+
+  return db.prepare(`
+    SELECT *
+    FROM whatsapp_integrations
+    WHERE phone_number = ?
+  `).get(phoneNumber);
+}
+
+function getWhatsappIntegrationByPhone(phoneNumber) {
+  return db.prepare(`
+    SELECT *
+    FROM whatsapp_integrations
+    WHERE phone_number = ?
+    LIMIT 1
+  `).get(phoneNumber);
+}
+
+function getWhatsappIntegrationByBusinessId(businessId) {
+  return db.prepare(`
+    SELECT *
+    FROM whatsapp_integrations
+    WHERE business_id = ?
+    ORDER BY id DESC
+    LIMIT 1
+  `).get(businessId);
+}
+
 module.exports = {
   findOrCreateUser,
   updateUserState,
   saveMessage,
   createAppointment,
   listAppointmentsInRange,
+  findOrCreateCustomer,
+  updateCustomerMemory,
+  listRecentAppointmentsByCustomer,
+  getBusiness,
+  getActiveSubscription,
+  updateBusinessSettings,
+  updateBusinessProfile,
+  setWhatsappIntegration,
+  getWhatsappIntegrationByPhone,
+  getWhatsappIntegrationByBusinessId,
 };

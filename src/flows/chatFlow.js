@@ -8,6 +8,7 @@ const businessSkills = require("../ai/skills/businessSkills");
 const env = require("../config/env");
 const repos = require("../database/repositories");
 const logger = require("../utils/logger");
+const { hasDateHint } = require("../utils/dateParser");
 
 function isCommand(text, command) {
   return normalizeText(text) === command;
@@ -15,22 +16,9 @@ function isCommand(text, command) {
 
 function formatSlots(slots) {
   if (!slots.length) {
-    return "Nao encontrei horario livre nessa data. Quer tentar outro dia?";
+    return responseService.generateHumanResponse("no_slots");
   }
-  const list = slots.slice(0, 4).map((slot, index) => `${index + 1}) ${slot.label}`).join("\n");
-  return `Tenho estes horarios livres:\n${list}\n\nMe diga o numero da opcao.`;
-}
-
-function hasDateHint(normalizedText) {
-  if (!normalizedText) return false;
-  if (normalizedText.includes("amanha") || normalizedText.includes("hoje")) return true;
-  return /\b\d{1,2}\/\d{1,2}(\/\d{2,4})?\b/.test(normalizedText) || /\b\d{4}-\d{2}-\d{2}\b/.test(normalizedText);
-}
-
-function extractServiceFromText(text) {
-  const normalized = normalizeText(text);
-  const services = businessSkills.listServices(env.businessType) || [];
-  return services.find((service) => normalized.includes(normalizeText(service))) || null;
+  return responseService.generateHumanResponse("slots_list", {}, { slots });
 }
 
 function continuationPrompt(user) {
@@ -47,8 +35,8 @@ async function handleChat({ phone, message }) {
   let user = stateService.getUser(phone);
   const text = (message || "").trim();
   const normalized = normalizeText(text);
-  const detectedService = extractServiceFromText(text);
-  const dateHint = hasDateHint(normalized);
+  const detectedService = businessSkills.matchServiceFromText(text);
+  const dateHint = hasDateHint(text);
   repos.saveMessage(user.id, "in", text);
 
   logger.info("chatFlow", "Mensagem recebida", { phone, state: user.state, text });
@@ -65,23 +53,23 @@ async function handleChat({ phone, message }) {
 
   if (isCommand(text, GLOBAL_COMMANDS.MENU)) {
     user = stateService.setState(user, { state: STATES.IDLE });
-    return responseService.fallbackMenu();
+    return responseService.fallbackMenu(user.name);
   }
 
   const intent = intentService.detectIntent(text);
   logger.info("chatFlow", "Intencao detectada", { phone, intent });
 
   if (intent === "services" && user.state !== STATES.AWAITING_CONFIRMATION) {
-    return `${responseService.servicesMessage()}${continuationPrompt(user)}`;
+    return `${responseService.servicesMessage(user.name)}${continuationPrompt(user)}`;
   }
 
   if (intent === "price" && user.state !== STATES.AWAITING_CONFIRMATION) {
-    return `${responseService.priceMessage()}${continuationPrompt(user)}`;
+    return `${responseService.priceMessage(user.name)}${continuationPrompt(user)}`;
   }
 
   if (user.state === STATES.AWAITING_SERVICE) {
     if (detectedService && dateHint) {
-      const slots = await appointmentService.getSlots(text);
+      const slots = await appointmentService.getSlots(text, { serviceName: detectedService });
       if (!slots.length) {
         user = stateService.setState(user, {
           state: STATES.AWAITING_DATE,
@@ -100,19 +88,42 @@ async function handleChat({ phone, message }) {
       return formatSlots(slots);
     }
 
+    if (!detectedService) {
+      user = stateService.setState(user, {
+        state: STATES.AWAITING_SERVICE,
+        current_service: null,
+      });
+      return responseService.scheduleStartMessage(user.name);
+    }
+
     user = stateService.setState(user, {
       state: STATES.AWAITING_DATE,
-      current_service: detectedService || text,
+      current_service: detectedService,
     });
-    return responseService.askDateMessage();
+    return responseService.askDateMessage(user.name);
   }
 
   if (user.state === STATES.AWAITING_DATE) {
+    if (!user.current_service || hasDateHint(user.current_service)) {
+      user = stateService.setState(user, {
+        state: STATES.AWAITING_SERVICE,
+        current_service: null,
+        current_slot: null,
+      });
+      return responseService.scheduleStartMessage(user.name);
+    }
+
     if (detectedService && !user.current_service) {
       user = stateService.setState(user, { current_service: detectedService });
     }
 
-    const slots = await appointmentService.getSlots(text);
+    if (!dateHint) {
+      return responseService.askDateMessage(user.name);
+    }
+
+    const slots = await appointmentService.getSlots(text, {
+      serviceName: user.current_service || undefined,
+    });
     if (!slots.length) {
       user = stateService.setState(user, {
         state: STATES.AWAITING_DATE,
@@ -131,9 +142,74 @@ async function handleChat({ phone, message }) {
 
   if (user.state === STATES.AWAITING_CONFIRMATION) {
     const slots = JSON.parse(user.current_slot || "[]");
+    if (!slots.length) {
+      if (detectedService) {
+        user = stateService.setState(user, {
+          state: STATES.AWAITING_DATE,
+          current_service: detectedService,
+        });
+        return responseService.askDateMessage(user.name);
+      }
+      user = stateService.setState(user, {
+        state: STATES.AWAITING_DATE,
+        current_slot: null,
+      });
+      return responseService.askDateMessage(user.name);
+    }
+
+    const choiceEarly = intentService.extractChoice(text, slots.length || 4);
+    if (
+      intent === "schedule" &&
+      !dateHint &&
+      (!choiceEarly || !slots[choiceEarly - 1])
+    ) {
+      if (detectedService) {
+        user = stateService.setState(user, {
+          state: STATES.AWAITING_DATE,
+          current_service: detectedService,
+          current_date_text: null,
+          current_slot: null,
+        });
+        return responseService.askDateMessage(user.name);
+      }
+      user = stateService.setState(user, {
+        state: STATES.AWAITING_SERVICE,
+        current_service: null,
+        current_date_text: null,
+        current_slot: null,
+      });
+      return responseService.scheduleStartMessage(user.name);
+    }
+
+    if (dateHint && intent === "schedule") {
+      const mergedText = [user.current_service, text].filter(Boolean).join(" ");
+      const slotsNew = await appointmentService.getSlots(mergedText || text, {
+        serviceName: user.current_service || undefined,
+      });
+      if (!slotsNew.length) {
+        user = stateService.setState(user, {
+          state: STATES.AWAITING_DATE,
+          current_date_text: mergedText || text,
+          current_slot: null,
+        });
+        return formatSlots(slotsNew);
+      }
+      user = stateService.setState(user, {
+        state: STATES.AWAITING_CONFIRMATION,
+        current_date_text: mergedText || text,
+        current_slot: JSON.stringify(slotsNew.slice(0, 4)),
+      });
+      return formatSlots(slotsNew);
+    }
     const choice = intentService.extractChoice(text, slots.length || 4);
     if (!choice || !slots[choice - 1]) {
-      return responseService.slotChoiceRetryMessage();
+      if (
+        slots.length &&
+        (intent === "schedule" || intent === "greeting" || intent === "unknown")
+      ) {
+        return responseService.generateHumanResponse("slots_reminder", {}, { slots });
+      }
+      return responseService.slotChoiceRetryMessage(user.name);
     }
     const selectedSlot = slots[choice - 1];
     let result;
@@ -152,7 +228,7 @@ async function handleChat({ phone, message }) {
           state: STATES.AWAITING_CONFIRMATION,
           current_slot: JSON.stringify(refreshedSlots.slice(0, 4)),
         });
-        return `Esse horario acabou de ficar indisponivel.\n\n${formatSlots(refreshedSlots)}`;
+        return responseService.generateHumanResponse("slot_unavailable", {}, { slots: refreshedSlots });
       }
       throw error;
     }
@@ -164,24 +240,24 @@ async function handleChat({ phone, message }) {
       current_slot: null,
     });
 
-    return `Fechado! Seu agendamento foi confirmado para ${selectedSlot.label}. Protocolo #${result.appointment.id}.`;
+    return `${user.name ? `${user.name}, ` : ""}Fechado! Seu agendamento foi confirmado para ${selectedSlot.label}. Protocolo #${result.appointment.id}.`;
   }
 
   if (intent === "greeting") {
-    return `${responseService.greetingMessage()}\n${responseService.fallbackMenu()}`;
+    return `${responseService.greetingMessage(user.name)}\n${responseService.fallbackMenu(user.name)}`;
   }
 
   if (intent === "services") {
-    return responseService.servicesMessage();
+    return responseService.servicesMessage(user.name);
   }
 
   if (intent === "price") {
-    return responseService.priceMessage();
+    return responseService.priceMessage(user.name);
   }
 
   if (intent === "schedule") {
     if (detectedService && dateHint) {
-      const slots = await appointmentService.getSlots(text);
+      const slots = await appointmentService.getSlots(text, { serviceName: detectedService });
       if (!slots.length) {
         stateService.setState(user, {
           state: STATES.AWAITING_DATE,
@@ -205,27 +281,27 @@ async function handleChat({ phone, message }) {
         state: STATES.AWAITING_DATE,
         current_service: detectedService,
       });
-      return responseService.askDateMessage();
+      return responseService.askDateMessage(user.name);
     }
 
     stateService.setState(user, { state: STATES.AWAITING_SERVICE });
-    return responseService.scheduleStartMessage();
+    return responseService.scheduleStartMessage(user.name);
   }
 
   const menuChoice = intentService.extractChoice(text, 3);
 
   if (menuChoice === 1) {
     stateService.setState(user, { state: STATES.AWAITING_SERVICE });
-    return responseService.scheduleStartMessage();
+    return responseService.scheduleStartMessage(user.name);
   }
   if (menuChoice === 2) {
-    return responseService.servicesMessage();
+    return responseService.servicesMessage(user.name);
   }
   if (menuChoice === 3) {
-    return responseService.priceMessage();
+    return responseService.priceMessage(user.name);
   }
 
-  return responseService.fallbackMenu();
+  return responseService.fallbackMenu(user.name);
 }
 
 module.exports = {

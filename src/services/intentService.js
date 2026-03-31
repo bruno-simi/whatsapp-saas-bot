@@ -2,13 +2,25 @@ const { normalizeText } = require("../utils/text");
 
 const KEYWORDS = {
   greeting: ["oi", "ola", "bom dia", "boa tarde", "boa noite", "e ai", "fala"],
-  schedule: ["agendar", "marcar", "horario", "amanha", "amanhã", "agenda", "disponibilidade", "quero um horario"],
+  schedule: [
+    "agendar",
+    "marcar",
+    "horario",
+    "amanha",
+    "amanhã",
+    "agenda",
+    "disponibilidade",
+    "quero um horario",
+    "consulta",
+    "agendamento",
+  ],
   price: ["preco", "valor", "quanto custa", "quanto", "orcamento", "tabela de preco"],
   services: ["servicos", "serviços", "o que fazem", "procedimentos", "atendimentos", "trabalham com"],
 };
 
 const OPTION_WORDS = {
-  1: ["1", "primeira", "primeiro", "um", "uma"],
+  // Evita "uma consulta" / "um corte" serem lidos como opcao 1
+  1: ["1", "primeira", "primeiro"],
   2: ["2", "segunda", "segundo", "dois", "duas"],
   3: ["3", "terceira", "terceiro", "tres", "três"],
   4: ["4", "quarta", "quarto", "quatro"],

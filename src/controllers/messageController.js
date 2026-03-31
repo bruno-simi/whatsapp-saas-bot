@@ -3,8 +3,10 @@ const repos = require("../database/repositories");
 const stateService = require("../services/stateService");
 const logger = require("../utils/logger");
 const env = require("../config/env");
-const { getContext, updateContext } = require("../ai/contextStore");
+const { updateContext } = require("../ai/contextStore");
 const { processMessage } = require("../ai/decisionEngine");
+const { buildAIContext } = require("../ai/buildAIContext");
+const { STATES } = require("../utils/constants");
 
 const botSentMessageIds = new Set();
 const processedIncomingMessageIds = new Set();
@@ -26,6 +28,19 @@ function extractText(message) {
   if (content.conversation) return content.conversation;
   if (content.extendedTextMessage?.text) return content.extendedTextMessage.text;
   return "";
+}
+
+function extractFirstName(name) {
+  return String(name || "").trim().split(/\s+/)[0] || "";
+}
+
+function looksLikeName(text) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed || trimmed.length < 2 || trimmed.length > 60) return false;
+  if (/\d/.test(trimmed)) return false;
+  const words = trimmed.split(/\s+/);
+  if (words.length > 4) return false;
+  return words.every((word) => /^[A-Za-zÀ-ÖØ-öø-ÿ'-]+$/.test(word));
 }
 
 async function handleIncomingMessage(sock, msg) {
@@ -51,22 +66,32 @@ async function handleIncomingMessage(sock, msg) {
   if (!text) return;
 
   const user = stateService.getUser(phone);
+  const trimmedText = text.trim();
+
+  if (env.tenantId === "consultorio-demo" && !user.name) {
+    repos.saveMessage(user.id, "in", trimmedText);
+
+    let reply = "Para iniciar seu atendimento, poderia me informar seu nome completo?";
+    if (looksLikeName(trimmedText)) {
+      const updatedUser = stateService.setState(user, { name: trimmedText });
+      const shortName = extractFirstName(updatedUser.name);
+      reply = `Perfeito, ${shortName}. Em que posso te ajudar hoje?`;
+    }
+
+    repos.saveMessage(user.id, "out", reply);
+    logger.info("messageController", "Coleta inicial de nome", { phone, reply });
+    const sent = await sock.sendMessage(msg.key.remoteJid, { text: reply });
+    if (sent?.key?.id) {
+      botSentMessageIds.add(sent.key.id);
+    }
+    return;
+  }
+
   if (!user.name && text.split(" ").length <= 3 && !/\d/.test(text)) {
     stateService.setState(user, { name: text });
   }
 
-  const memoryContext = getContext(phone);
-  const aiContext = {
-    ...memoryContext,
-    phone,
-    businessType: env.businessType,
-    currentState: user.state,
-    lastMessages: [...(memoryContext.lastMessages || []), text].slice(-6),
-    collectedData: {
-      ...(memoryContext.collectedData || {}),
-      name: user.name || null,
-    },
-  };
+  const aiContext = buildAIContext({ ...user, phone }, text);
 
   const decision = await processMessage(text, aiContext);
   logger.info("messageController", "Decisao da mensagem", {
@@ -78,6 +103,18 @@ async function handleIncomingMessage(sock, msg) {
   });
 
   let reply = decision.reply;
+  if (
+    (decision.action === "suggest_slots" || decision.action === "suggest_next_slots")
+    && Array.isArray(decision.data?.slots)
+    && decision.data.slots.length
+  ) {
+    stateService.setState(user, {
+      state: STATES.AWAITING_CONFIRMATION,
+      current_service: decision.data.service || user.current_service || null,
+      current_date_text: decision.data.date || user.current_date_text || null,
+      current_slot: JSON.stringify(decision.data.slots),
+    });
+  }
   if (!decision.handled || decision.useLegacyFlow || !reply) {
     reply = await chatFlow.handleChat({ phone, message: text });
   }

@@ -12,6 +12,7 @@ const qrcode = require("qrcode-terminal");
 const env = require("../config/env");
 const logger = require("../utils/logger");
 const messageController = require("../controllers/messageController");
+const repos = require("../database/repositories");
 
 const sessionsRoot = path.resolve(__dirname, "..", "..", "sessions");
 let isSessionLogSuppressed = false;
@@ -57,6 +58,14 @@ async function startWhatsapp() {
       qrcode.generate(qr, { small: true });
     }
     if (connection === "open") {
+      const rawPhone = (sock?.user?.id || "").split(":")[0] || "";
+      const whatsappPhone = rawPhone.replace(/\D/g, "");
+      const integration = whatsappPhone
+        ? repos.getWhatsappIntegrationByPhone(whatsappPhone)
+        : null;
+      if (integration?.business_id) {
+        env.tenantId = integration.business_id;
+      }
       logger.info("whatsappService", "Conexao WhatsApp estabelecida");
     }
     if (connection === "close") {

@@ -1,0 +1,88 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Business {
+  id           String         @id @default(cuid())
+  name         String
+  type         String
+  plan         String         @default("starter")
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  users        User[]
+  customers    Customer[]
+  appointments Appointment[]
+  subscriptions Subscription[]
+  whatsapp     WhatsappIntegration?
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  role         String   @default("owner")
+  businessId   String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+}
+
+model Customer {
+  id         String        @id @default(cuid())
+  businessId String
+  name       String
+  phone      String
+  notes      String?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  business   Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  appointments Appointment[]
+
+  @@index([businessId])
+}
+
+model Appointment {
+  id         String   @id @default(cuid())
+  businessId String
+  customerId String
+  service    String
+  datetime   DateTime
+  status     String   @default("scheduled")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([customerId])
+}
+
+model Subscription {
+  id                   String   @id @default(cuid())
+  businessId           String
+  stripeCustomerId     String
+  stripeSubscriptionId String?  @unique
+  status               String   @default("inactive")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  business             Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([stripeCustomerId])
+}
+
+model WhatsappIntegration {
+  id          String   @id @default(cuid())
+  businessId  String   @unique
+  phoneNumber String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}

@@ -1,9 +1,15 @@
 const { google } = require("googleapis");
 const dayjs = require("dayjs");
 const env = require("../config/env");
+const repos = require("../database/repositories");
+
+function resolveCalendarId() {
+  const business = repos.getBusiness();
+  return business?.calendar_id || env.googleCalendarId;
+}
 
 function buildGoogleClient() {
-  if (!env.googleCredentials || !env.googleCalendarId) {
+  if (!env.googleCredentials || !resolveCalendarId()) {
     throw new Error("Google Calendar nao configurado");
   }
 
@@ -16,29 +22,43 @@ function buildGoogleClient() {
   return google.calendar({ version: "v3", auth });
 }
 
-function toSlotLabel(dateIso) {
-  return dayjs(dateIso).format("DD/MM HH:mm");
+function toSlotLabel(startIso, endIso) {
+  return `${dayjs(startIso).format("DD/MM HH:mm")} - ${dayjs(endIso).format("HH:mm")}`;
 }
 
-async function listAvailableSlots(dateTime) {
+async function listAvailableSlots(dateTime, options = {}) {
   const calendar = buildGoogleClient();
+  const calendarId = resolveCalendarId();
   const dayStart = dayjs(dateTime).startOf("day").hour(8);
   const dayEnd = dayjs(dateTime).startOf("day").hour(18);
+  const durationMinutes = Number(options.durationMinutes || 45);
+  const intervalMinutes = Number(options.intervalMinutes || 60);
 
   const busy = await calendar.freebusy.query({
     requestBody: {
       timeMin: dayStart.toISOString(),
       timeMax: dayEnd.toISOString(),
-      items: [{ id: env.googleCalendarId }],
+      items: [{ id: calendarId }],
     },
   });
 
-  const busyRanges = busy.data.calendars[env.googleCalendarId]?.busy || [];
+  const busyRanges = busy.data.calendars[calendarId]?.busy || [];
   const slots = [];
 
-  for (let h = 8; h < 18; h += 1) {
-    const start = dayjs(dateTime).startOf("day").hour(h).minute(0).second(0).millisecond(0);
-    const end = start.add(45, "minute");
+  for (
+    let minute = dayStart.hour() * 60;
+    minute < dayEnd.hour() * 60;
+    minute += intervalMinutes
+  ) {
+    const start = dayjs(dateTime)
+      .startOf("day")
+      .add(minute, "minute")
+      .second(0)
+      .millisecond(0);
+    const end = start.add(durationMinutes, "minute");
+    if (end.isAfter(dayEnd)) {
+      continue;
+    }
     const conflict = busyRanges.some((range) => {
       const busyStart = dayjs(range.start);
       const busyEnd = dayjs(range.end);
@@ -48,7 +68,7 @@ async function listAvailableSlots(dateTime) {
       slots.push({
         start: start.toISOString(),
         end: end.toISOString(),
-        label: toSlotLabel(start.toISOString()),
+        label: toSlotLabel(start.toISOString(), end.toISOString()),
       });
     }
   }
@@ -58,8 +78,9 @@ async function listAvailableSlots(dateTime) {
 
 async function createEvent(payload) {
   const calendar = buildGoogleClient();
+  const calendarId = resolveCalendarId();
   const event = await calendar.events.insert({
-    calendarId: env.googleCalendarId,
+    calendarId,
     requestBody: {
       summary: `${payload.service} - ${payload.name}`,
       description: `Agendado via bot WhatsApp\nTelefone: ${payload.phone}`,

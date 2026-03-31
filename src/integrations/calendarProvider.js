@@ -1,22 +1,25 @@
 const env = require("../config/env");
 const logger = require("../utils/logger");
+const repos = require("../database/repositories");
 const mock = require("./googleCalendarMock");
 const real = require("./googleCalendarReal");
 
 function shouldUseMock() {
+  const business = repos.getBusiness();
+  const businessCalendarId = business?.calendar_id || "";
   if (env.useCalendarMock) {
     return true;
   }
-  return !env.googleCalendarId || !env.googleCredentials;
+  return (!env.googleCalendarId && !businessCalendarId) || !env.googleCredentials;
 }
 
-async function listAvailableSlots(dateTime) {
+async function listAvailableSlots(dateTime, options = {}) {
   if (shouldUseMock()) {
     logger.warn("calendarProvider", "Usando modo mock para listar horarios");
-    return mock.listAvailableSlots(dateTime);
+    return mock.listAvailableSlots(dateTime, options);
   }
   try {
-    return await real.listAvailableSlots(dateTime);
+    return await real.listAvailableSlots(dateTime, options);
   } catch (error) {
     logger.error("calendarProvider", "Falha no Google Calendar real ao listar horarios", error.message);
     return [];

@@ -1,22 +1,21 @@
 const dayjs = require("dayjs");
 
-function generateSlots(baseDateTime) {
-  const base = dayjs(baseDateTime).minute(0).second(0);
+function generateSlots(baseDateTime, options = {}) {
+  const base = dayjs(baseDateTime).second(0).millisecond(0);
+  const intervalMinutes = Number(options.intervalMinutes || 60);
   const slots = [];
-  for (let i = 1; i <= 5; i += 1) {
-    const start = base.add(i, "hour");
+  for (let i = 0; i < 5; i += 1) {
+    const start = base.add(i * intervalMinutes, "minute");
     slots.push({
       start: start.toISOString(),
-      end: start.add(45, "minute").toISOString(),
-      label: start.format("DD/MM HH:mm"),
     });
   }
   return slots;
 }
 
 module.exports = {
-  async listAvailableSlots(dateTime) {
-    return generateSlots(dateTime || new Date().toISOString());
+  async listAvailableSlots(dateTime, options = {}) {
+    return generateSlots(dateTime || new Date().toISOString(), options);
   },
 
   async createEvent(payload) {
