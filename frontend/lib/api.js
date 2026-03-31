@@ -1,7 +1,17 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+const API_URL = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
+
+function requestUrl(path) {
+  if (API_URL) return `${API_URL}${path}`;
+
+  if (typeof window !== "undefined") {
+    return `/api${path}`;
+  }
+
+  return `http://127.0.0.1:4000${path}`;
+}
 
 export async function apiRequest(path, options = {}) {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetch(requestUrl(path), {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -12,7 +22,8 @@ export async function apiRequest(path, options = {}) {
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data.error || "Erro na requisicao");
+    const msg = data.error || data.message || (response.status ? `Erro HTTP ${response.status}` : null);
+    throw new Error(msg || "Erro na requisicao");
   }
 
   return data;

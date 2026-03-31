@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 10, "column": 0}, "map": {"version":3,"sources":["file:///home/bruno.simi%40sp01.local/Documentos/whatsapp-saas-bot/frontend/app/page.js"],"sourcesContent":["import { redirect } from \"next/navigation\";\n\nexport default function HomePage() {\n  redirect(\"/login\");\n}\n"],"names":["HomePage"],"mappings":";;;;AAAA;AAAA;;AAEe,SAASA;IACtB,IAAA,6MAAQ,EAAC;AACX"}}]
+}

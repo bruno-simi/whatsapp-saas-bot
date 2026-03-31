@@ -9,81 +9,104 @@ const authMiddleware = require("../middlewares/auth");
 
 const router = express.Router();
 
+function stripeCustomerIdForRegister() {
+  const key = (env.stripeSecretKey || "").trim();
+  if (key.length > 20 && key.startsWith("sk_")) {
+    return null;
+  }
+  return `cus_local_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 router.post("/register", async (req, res) => {
-  const missing = requireFields(req.body, ["email", "password", "businessName", "businessType"]);
-  if (missing.length) {
-    return res.status(400).json({ ok: false, error: `Campos obrigatorios: ${missing.join(", ")}` });
-  }
+  try {
+    const missing = requireFields(req.body, ["email", "password", "businessName", "businessType"]);
+    if (missing.length) {
+      return res.status(400).json({ ok: false, error: `Campos obrigatorios: ${missing.join(", ")}` });
+    }
 
-  const { email, password, businessName, businessType, plan } = req.body;
-  if (!isEmail(email)) {
-    return res.status(400).json({ ok: false, error: "Email invalido" });
-  }
+    const { email, password, businessName, businessType, plan } = req.body;
+    if (!isEmail(email)) {
+      return res.status(400).json({ ok: false, error: "Email invalido" });
+    }
 
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) {
-    return res.status(409).json({ ok: false, error: "Email ja cadastrado" });
-  }
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      return res.status(409).json({ ok: false, error: "Email ja cadastrado" });
+    }
 
-  const passwordHash = await hashPassword(password);
-  const stripeCustomer = await stripe.customers.create({
-    email,
-    name: businessName,
-    metadata: { businessType },
-  });
-
-  const result = await prisma.$transaction(async (tx) => {
-    const business = await tx.business.create({
-      data: {
-        name: businessName,
-        type: businessType,
-        plan: plan || "starter",
-      },
-    });
-
-    const user = await tx.user.create({
-      data: {
+    const passwordHash = await hashPassword(password);
+    let stripeCustomerId = stripeCustomerIdForRegister();
+    if (!stripeCustomerId) {
+      const stripeCustomer = await stripe.customers.create({
         email,
-        passwordHash,
-        role: "owner",
-        businessId: business.id,
-      },
+        name: businessName,
+        metadata: { businessType },
+      });
+      stripeCustomerId = stripeCustomer.id;
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const business = await tx.business.create({
+        data: {
+          name: businessName,
+          type: businessType,
+          plan: plan || "starter",
+        },
+      });
+
+      const user = await tx.user.create({
+        data: {
+          email,
+          passwordHash,
+          role: "owner",
+          businessId: business.id,
+        },
+      });
+
+      await tx.subscription.create({
+        data: {
+          businessId: business.id,
+          stripeCustomerId,
+          status: "inactive",
+        },
+      });
+
+      return { business, user };
     });
 
-    await tx.subscription.create({
-      data: {
-        businessId: business.id,
-        stripeCustomerId: stripeCustomer.id,
-        status: "inactive",
-      },
-    });
-
-    return { business, user };
-  });
-
-  const token = signAuthToken({
-    userId: result.user.id,
-    businessId: result.business.id,
-    role: result.user.role,
-  });
-
-  res.cookie("access_token", token, {
-    httpOnly: true,
-    secure: false,
-    sameSite: "lax",
-    maxAge: 1000 * 60 * 60 * 24,
-  });
-
-  return res.status(201).json({
-    ok: true,
-    token,
-    user: {
-      id: result.user.id,
-      email: result.user.email,
-      role: result.user.role,
+    const token = signAuthToken({
+      userId: result.user.id,
       businessId: result.business.id,
-    },
-  });
+      role: result.user.role,
+    });
+
+    res.cookie("access_token", token, {
+      httpOnly: true,
+      secure: false,
+      sameSite: "lax",
+      maxAge: 1000 * 60 * 60 * 24,
+    });
+
+    return res.status(201).json({
+      ok: true,
+      token,
+      user: {
+        id: result.user.id,
+        email: result.user.email,
+        role: result.user.role,
+        businessId: result.business.id,
+      },
+    });
+  } catch (err) {
+    console.error("[auth/register]", err);
+    const message =
+      err && err.code === "P1001"
+        ? "Banco de dados indisponivel. Verifique PostgreSQL e DATABASE_URL."
+        : err && err.message
+          ? err.message
+          : "Erro ao cadastrar";
+    return res.status(500).json({ ok: false, error: message });
+  }
 });
 
 router.post("/login", async (req, res) => {

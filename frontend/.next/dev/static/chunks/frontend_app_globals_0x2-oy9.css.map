@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["file:///home/bruno.simi%40sp01.local/Documentos/whatsapp-saas-bot/frontend/app/globals.css"],"sourcesContent":["@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\nbody {\n  background: #f8fafc;\n  color: #0f172a;\n}\n"],"names":[],"mappings":"AAAA;;AACA;;AACA;;AAEA"}}]
+}

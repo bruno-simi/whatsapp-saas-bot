@@ -1,0 +1,13 @@
+/* [project]/frontend/app/globals.css [app-client] (css) */
+@tailwind base;
+
+@tailwind components;
+
+@tailwind utilities;
+
+body {
+  color: #0f172a;
+  background: #f8fafc;
+}
+
+/*# sourceMappingURL=frontend_app_globals_0x2-oy9.css.map*/

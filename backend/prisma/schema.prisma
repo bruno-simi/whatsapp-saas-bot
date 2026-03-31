@@ -19,6 +19,7 @@ model Business {
   appointments Appointment[]
   subscriptions Subscription[]
   whatsapp     WhatsappIntegration?
+  templates    Template[]
 }
 
 model User {
@@ -85,4 +86,62 @@ model WhatsappIntegration {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+model TemplateGroup {
+  id        String     @id @default(cuid())
+  slug      String     @unique
+  name      String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  templates Template[]
+}
+
+model Template {
+  id           String            @id @default(cuid())
+  businessId   String?
+  businessType String?
+  groupId      String
+  name         String
+  channel      String            @default("whatsapp")
+  scope        String            @default("business")
+  isActive     Boolean           @default(true)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  business     Business?         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  group        TemplateGroup     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  versions     TemplateVersion[]
+  events       TemplateEvent[]
+
+  @@index([businessId])
+  @@index([businessType])
+  @@index([groupId])
+  @@index([scope])
+}
+
+model TemplateVersion {
+  id             String   @id @default(cuid())
+  templateId     String
+  version        Int
+  content        String
+  variablesJson  Json?
+  approvalStatus String   @default("draft")
+  createdBy      String?
+  createdAt      DateTime @default(now())
+  template       Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, version])
+  @@index([approvalStatus])
+}
+
+model TemplateEvent {
+  id         String   @id @default(cuid())
+  templateId String
+  action     String
+  actorId    String?
+  payload    Json?
+  createdAt  DateTime @default(now())
+  template   Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId])
 }
